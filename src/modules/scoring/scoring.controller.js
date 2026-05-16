@@ -5,8 +5,8 @@ const scoringService = require("./scoring.service");
 module.exports = {
   calculate: async (req, res, next) => {
     try {
-      const data = await scoringService.calculate(req.body);
-      return ApiResponse.success(res, data, "Scoring calculate placeholder");
+      const data = await scoringService.calculate(req.params.applicationId);
+      return ApiResponse.success(res, data, "Bilan ESG calculé avec succès.");
     } catch (error) {
       return next(error);
     }
@@ -14,7 +14,7 @@ module.exports = {
   getByApplicationId: async (req, res, next) => {
     try {
       const data = await scoringService.getByApplicationId(req.params.applicationId);
-      return ApiResponse.success(res, data, "Scoring getByApplicationId placeholder");
+      return ApiResponse.success(res, data, "Bilan ESG récupéré avec succès.");
     } catch (error) {
       return next(error);
     }

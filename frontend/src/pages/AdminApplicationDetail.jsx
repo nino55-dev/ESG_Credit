@@ -125,6 +125,15 @@ function groupAttachmentsByDocumentType(attachments) {
   }, {});
 }
 
+function getQuestionDisplay(questionCode, metadata) {
+  if (!questionCode) {
+    return { label: null, code: null };
+  }
+
+  const label = metadata?.questionMap?.[questionCode]?.label || null;
+  return { label, code: questionCode };
+}
+
 function parseJsonArray(value) {
   try {
     const parsed = JSON.parse(value);
@@ -176,11 +185,32 @@ function AdminApplicationDetail() {
   const [answers, setAnswers] = useState([]);
   const [attachments, setAttachments] = useState([]);
   const [formMetadata, setFormMetadata] = useState(null);
+  const [esgResult, setEsgResult] = useState(null);
+  const [esgError, setEsgError] = useState("");
+  const [esgLoading, setEsgLoading] = useState(true);
+  const [esgActionLoading, setEsgActionLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("resume");
 
   useEffect(() => {
+    async function loadScoringResult() {
+      try {
+        setEsgLoading(true);
+        const scoringResponse = await api.get(`/scoring/applications/${id}/result`);
+        setEsgResult(scoringResponse.data.data);
+        setEsgError("");
+      } catch (requestError) {
+        setEsgResult(null);
+        setEsgError(
+          requestError.response?.data?.message ||
+            "Aucun bilan ESG calculé pour cette demande."
+        );
+      } finally {
+        setEsgLoading(false);
+      }
+    }
+
     async function loadData() {
       try {
         const [applicationResponse, answersResponse, formResponse, attachmentsResponse] =
@@ -195,6 +225,7 @@ function AdminApplicationDetail() {
         setAnswers(answersResponse.data.data || []);
         setFormMetadata(buildFormMetadata(formResponse.data.data));
         setAttachments(attachmentsResponse.data.data || []);
+        await loadScoringResult();
       } catch (requestError) {
         setError(
           requestError.response?.data?.message ||
@@ -232,11 +263,36 @@ function AdminApplicationDetail() {
     window.URL.revokeObjectURL(downloadUrl);
   }
 
+  async function handleCalculateScoring() {
+    try {
+      setEsgActionLoading(true);
+      const response = await api.post(`/scoring/applications/${id}/calculate`);
+      setEsgResult(response.data.data);
+      setEsgError("");
+      setApplication((current) =>
+        current
+          ? {
+              ...current,
+              categoryAuto: response.data.data?.categoryAuto || current.categoryAuto,
+            }
+          : current
+      );
+    } catch (requestError) {
+      setEsgError(
+        requestError.response?.data?.message || "Calcul du bilan ESG impossible."
+      );
+    } finally {
+      setEsgActionLoading(false);
+      setEsgLoading(false);
+    }
+  }
+
   const tabs = [
     { id: "resume", label: "Résumé" },
     { id: "profile", label: "Signalétique du projet" },
     { id: "attachments", label: "Pièces justificatives" },
     { id: "answers", label: "Réponses SGES" },
+    { id: "esg", label: "Bilan ESG" },
     { id: "observations", label: "Observations administrateur" },
   ];
 
@@ -417,6 +473,141 @@ function AdminApplicationDetail() {
                     </div>
                   </details>
                 ))}
+              </section>
+            ) : null}
+
+            {activeTab === "esg" ? (
+              <section className="panel stack">
+                <div className="summary-row">
+                  <div>
+                    <h3>Bilan ESG</h3>
+                    <p className="muted-text">
+                      Résultat calculé par le moteur de règles SGES/ESG.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={handleCalculateScoring}
+                    disabled={esgActionLoading}
+                  >
+                    {esgResult ? "Recalculer le bilan ESG" : "Calculer le bilan ESG"}
+                  </button>
+                </div>
+
+                {esgLoading ? (
+                  <p className="muted-text">Chargement du bilan ESG...</p>
+                ) : null}
+
+                {!esgLoading && !esgResult ? (
+                  <>
+                    <p className="muted-text">
+                      {esgError || "Aucun bilan ESG calculé pour cette demande."}
+                    </p>
+                  </>
+                ) : null}
+
+                {esgResult ? (
+                  <>
+                    <div className="detail-grid">
+                      <div className="summary-row"><span>Catégorie SGES</span><strong>{esgResult.categoryAuto || "-"}</strong></div>
+                      <div className="summary-row"><span>Niveau de risque</span><strong>{esgResult.riskLevel || "-"}</strong></div>
+                      <div className="summary-row"><span>Secteur détecté</span><strong>{esgResult.sector || "-"}</strong></div>
+                      <div className="summary-row"><span>Score Environnement</span><strong>{esgResult.scores?.environment ?? "-"}</strong></div>
+                      <div className="summary-row"><span>Score Social</span><strong>{esgResult.scores?.social ?? "-"}</strong></div>
+                      <div className="summary-row"><span>Score Gouvernance</span><strong>{esgResult.scores?.governance ?? "-"}</strong></div>
+                      <div className="summary-row"><span>Score global ESG</span><strong>{esgResult.scores?.global ?? "-"}</strong></div>
+                    </div>
+
+                    <article className="stack">
+                      <h4>Red flags</h4>
+                      {!esgResult.redFlags?.length ? (
+                        <p className="muted-text">Aucun red flag identifié.</p>
+                      ) : (
+                        esgResult.redFlags.map((flag, index) => {
+                          const questionDisplay = getQuestionDisplay(flag.questionCode, formMetadata);
+
+                          return (
+                            <div key={`${flag.questionCode}-${index}`} className="question-review-card">
+                              <p><strong>Sévérité :</strong> {flag.severity}</p>
+                              <p><strong>Pilier :</strong> {flag.pillar}</p>
+                              {questionDisplay.label ? (
+                                <p><strong>Question :</strong> {questionDisplay.label}</p>
+                              ) : null}
+                              <p><strong>Message :</strong> {flag.message}</p>
+                              {questionDisplay.code ? (
+                                <p className="muted-text">Code interne : {questionDisplay.code}</p>
+                              ) : null}
+                            </div>
+                          );
+                        })
+                      )}
+                    </article>
+
+                    <article className="stack">
+                      <h4>Points forts</h4>
+                      {!esgResult.strengths?.length ? (
+                        <p className="muted-text">Aucun point fort mis en évidence.</p>
+                      ) : (
+                        esgResult.strengths.map((item, index) => <p key={`strength-${index}`}>• {item}</p>)
+                      )}
+                    </article>
+
+                    <article className="stack">
+                      <h4>Points faibles</h4>
+                      {!esgResult.weaknesses?.length ? (
+                        <p className="muted-text">Aucun point faible majeur identifié.</p>
+                      ) : (
+                        esgResult.weaknesses.map((item, index) => <p key={`weakness-${index}`}>• {item}</p>)
+                      )}
+                    </article>
+
+                    <article className="stack">
+                      <h4>Recommandations</h4>
+                      {!esgResult.recommendations?.length ? (
+                        <p className="muted-text">Aucune recommandation générée.</p>
+                      ) : (
+                        esgResult.recommendations.map((item, index) => {
+                          const sourceReferences = (item.sourceCodes || [])
+                            .map((code) => {
+                              const questionDisplay = getQuestionDisplay(code, formMetadata);
+                              return questionDisplay.label
+                                ? `${questionDisplay.label} (${code})`
+                                : code;
+                            })
+                            .filter(Boolean);
+
+                          return (
+                            <div key={`recommendation-${index}`} className="question-review-card">
+                              <p><strong>Priorité :</strong> {item.priority}</p>
+                              <p><strong>Pilier :</strong> {item.pillar}</p>
+                              <p><strong>Action :</strong> {item.title}</p>
+                              {sourceReferences.length ? (
+                                <p><strong>Références :</strong> {sourceReferences.join(", ")}</p>
+                              ) : null}
+                            </div>
+                          );
+                        })
+                      )}
+                    </article>
+
+                    <article className="stack">
+                      <h4>Détail par section</h4>
+                      {!esgResult.sectionBreakdown?.length ? (
+                        <p className="muted-text">Aucun détail de section disponible.</p>
+                      ) : (
+                        esgResult.sectionBreakdown.map((item) => (
+                          <div key={item.sectionCode} className="question-review-card">
+                            <p><strong>Section :</strong> {item.sectionTitle}</p>
+                            <p><strong>Pilier :</strong> {item.pillar}</p>
+                            <p><strong>Score :</strong> {item.score}</p>
+                            <p><strong>Synthèse :</strong> {item.summary}</p>
+                          </div>
+                        ))
+                      )}
+                    </article>
+                  </>
+                ) : null}
               </section>
             ) : null}
 

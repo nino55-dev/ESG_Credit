@@ -126,8 +126,31 @@ model Application {
   adminReviews         AdminReview[]
   committeeDecisions   CommitteeDecision[]
   correctiveActions    CorrectiveAction[]
+  esgAssessmentResult  ESGAssessmentResult?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
+}
+
+model ESGAssessmentResult {
+  id               String      @id @default(uuid())
+  applicationId    String      @unique
+  application      Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  categoryAuto     String
+  environmentScore Float
+  socialScore      Float
+  governanceScore  Float
+  globalScore      Float
+  riskLevel        String
+  redFlags         Json
+  strengths        Json
+  weaknesses       Json
+  recommendations  Json
+  sectionBreakdown Json
+  sectorWeights    Json
+  engineVersion    String      @default("RULES_V1")
+  calculatedAt     DateTime
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 }
 
 model QuestionnaireAnswer {
